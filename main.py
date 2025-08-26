@@ -1,7 +1,8 @@
-import uvicorn
-from app.api import app
-from app.database import init_db
 import asyncio
+
+import uvicorn
+
+from app.database import init_db
 
 
 async def main():

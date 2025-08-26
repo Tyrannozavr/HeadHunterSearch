@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hh_backend
+    restart: unless-stopped
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./hh_auto_apply.db:/app/hh_auto_apply.db
+    networks:
+      - hh_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: hh_nginx
+    restart: unless-stopped
+    ports:
+      - "81:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - hh_network
+    depends_on:
+      - backend
+
+networks:
+  hh_network:
+    driver: bridge 
