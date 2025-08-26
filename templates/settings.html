@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки системы - HH.ru Auto Apply</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+        }
+        .setting-item {
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #f8f9fa;
+        }
+        .log-item {
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+            border-radius: 0 10px 10px 0;
+        }
+        .log-item.failed {
+            border-left-color: #dc3545;
+        }
+        .log-item.no_token {
+            border-left-color: #ffc107;
+        }
+        .log-item.success {
+            border-left-color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="main-container p-5">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="display-5 fw-bold text-primary">
+                    <i class="fas fa-cogs me-3"></i>Настройки системы
+                </h1>
+                <a href="/" class="btn btn-outline-primary">
+                    <i class="fas fa-arrow-left me-2"></i>Назад
+                </a>
+            </div>
+
+            <!-- Настройки системы -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-sliders-h me-2"></i>Параметры автоматического отклика
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="settingsForm">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="setting-item">
+                                            <label class="form-label fw-bold">
+                                                <i class="fas fa-clock me-2"></i>Интервал проверки вакансий
+                                            </label>
+                                            <div class="input-group">
+                                                <input type="number" class="form-control" id="checkInterval" 
+                                                       min="5" max="1440" step="5" required>
+                                                <span class="input-group-text">минут</span>
+                                            </div>
+                                            <div class="form-text">
+                                                Как часто проверять новые вакансии (5-1440 минут)
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="setting-item">
+                                            <label class="form-label fw-bold">
+                                                <i class="fas fa-paper-plane me-2"></i>Максимум откликов в день
+                                            </label>
+                                            <div class="input-group">
+                                                <input type="number" class="form-control" id="maxApplications" 
+                                                       min="1" max="200" required>
+                                                <span class="input-group-text">откликов</span>
+                                            </div>
+                                            <div class="form-text">
+                                                Лимит откликов в сутки (1-200)
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-center mt-3">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-2"></i>Сохранить настройки
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Логи запросов -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-list-alt me-2"></i>Логи запросов к API
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <select class="form-select" id="logTypeFilter">
+                                        <option value="">Все типы запросов</option>
+                                        <option value="search_vacancies">Поиск вакансий</option>
+                                        <option value="apply_vacancy">Отклик на вакансию</option>
+                                        <option value="test_connection">Тест подключения</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <select class="form-select" id="logStatusFilter">
+                                        <option value="">Все статусы</option>
+                                        <option value="success">Успешно</option>
+                                        <option value="failed">Ошибка</option>
+                                        <option value="no_token">Нет токена</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <button class="btn btn-outline-secondary w-100" onclick="loadLogs()">
+                                        <i class="fas fa-filter me-2"></i>Применить фильтры
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div id="logsList">
+                                <div class="text-center text-muted">
+                                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                    <p class="mt-2">Загрузка логов...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Загрузка настроек при открытии страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSettings();
+            loadLogs();
+        });
+
+        // Загрузка настроек
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/system-settings');
+                if (response.ok) {
+                    const settings = await response.json();
+                    document.getElementById('checkInterval').value = settings.check_interval_minutes;
+                    document.getElementById('maxApplications').value = settings.max_applications_per_day;
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки настроек:', error);
+            }
+        }
+
+        // Сохранение настроек
+        document.getElementById('settingsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const checkInterval = document.getElementById('checkInterval').value;
+            const maxApplications = document.getElementById('maxApplications').value;
+            
+            try {
+                const response = await fetch('/api/system-settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        check_interval_minutes: parseInt(checkInterval),
+                        max_applications_per_day: parseInt(maxApplications)
+                    })
+                });
+                
+                if (response.ok) {
+                    showNotification('Настройки сохранены!', 'success');
+                } else {
+                    const data = await response.json();
+                    showNotification(data.detail || 'Ошибка сохранения', 'danger');
+                }
+            } catch (error) {
+                showNotification('Ошибка подключения к серверу', 'danger');
+            }
+        });
+
+        // Загрузка логов
+        async function loadLogs() {
+            try {
+                const logType = document.getElementById('logTypeFilter').value;
+                const logStatus = document.getElementById('logStatusFilter').value;
+                
+                let url = '/api/request-logs?limit=100';
+                if (logType) url += `&request_type=${logType}`;
+                if (logStatus) url += `&status=${logStatus}`;
+                
+                const response = await fetch(url);
+                if (response.ok) {
+                    const logs = await response.json();
+                    displayLogs(logs);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки логов:', error);
+                showError('Ошибка загрузки логов');
+            }
+        }
+
+        // Отображение логов
+        function displayLogs(logs) {
+            const container = document.getElementById('logsList');
+            
+            if (logs.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">Логи не найдены</div>';
+                return;
+            }
+            
+            const html = logs.map(log => `
+                <div class="log-item ${log.status}">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6 class="fw-bold mb-1">${getRequestTypeText(log.request_type)}</h6>
+                            <p class="mb-1 text-muted">${log.details || 'Нет деталей'}</p>
+                            ${log.error_message ? `<p class="mb-1 text-danger"><small>Ошибка: ${log.error_message}</small></p>` : ''}
+                            <small class="text-muted">
+                                ${new Date(log.created_at).toLocaleString()}
+                            </small>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <span class="badge bg-${getStatusColor(log.status)}">
+                                ${getStatusText(log.status)}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+
+        // Получение текста типа запроса
+        function getRequestTypeText(requestType) {
+            switch (requestType) {
+                case 'search_vacancies': return 'Поиск вакансий';
+                case 'apply_vacancy': return 'Отклик на вакансию';
+                case 'test_connection': return 'Тест подключения';
+                default: return requestType;
+            }
+        }
+
+        // Получение цвета статуса
+        function getStatusColor(status) {
+            switch (status) {
+                case 'success': return 'success';
+                case 'failed': return 'danger';
+                case 'no_token': return 'warning';
+                default: return 'secondary';
+            }
+        }
+
+        // Получение текста статуса
+        function getStatusText(status) {
+            switch (status) {
+                case 'success': return 'Успешно';
+                case 'failed': return 'Ошибка';
+                case 'no_token': return 'Нет токена';
+                default: return status;
+            }
+        }
+
+        // Показ уведомлений
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 3000);
+        }
+
+        // Показ ошибки
+        function showError(message) {
+            const container = document.getElementById('logsList');
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    ${message}
+                </div>
+            `;
+        }
+
+        // Обновление логов каждые 30 секунд
+        setInterval(loadLogs, 30000);
+    </script>
+</body>
+</html> 

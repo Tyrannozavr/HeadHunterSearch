@@ -1,8 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
-from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 import os
@@ -37,6 +36,18 @@ async def shutdown_event():
 async def index(request: Request):
     """Главная страница с формой"""
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/statistics", response_class=HTMLResponse)
+async def statistics(request: Request):
+    """Страница детальной статистики"""
+    return templates.TemplateResponse("statistics.html", {"request": request})
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings(request: Request):
+    """Страница настроек системы"""
+    return templates.TemplateResponse("settings.html", {"request": request})
 
 
 @app.post("/api/credentials", response_model=dict)
@@ -98,6 +109,29 @@ async def get_applications(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/job-searches/{job_search_id}/deactivate")
+async def deactivate_job_search(job_search_id: int, session: AsyncSession = Depends(get_db)):
+    """Деактивация поиска работы"""
+    try:
+        from sqlalchemy import select
+        from app.database import JobSearch
+        
+        result = await session.execute(
+            select(JobSearch).where(JobSearch.id == job_search_id)
+        )
+        job_search = result.scalar_one_or_none()
+        
+        if not job_search:
+            raise HTTPException(status_code=404, detail="Поиск не найден")
+        
+        job_search.is_active = False
+        await session.commit()
+        
+        return {"message": "Поиск деактивирован"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/start-auto-apply")
 async def start_auto_apply():
     """Запуск автоматического отклика"""
@@ -133,16 +167,40 @@ async def test_connection(session: AsyncSession = Depends(get_db)):
     try:
         access_token = await hh_client.get_access_token(session)
         if not access_token:
+            # Логируем отсутствие токена
+            await auto_apply_service.log_request(
+                session,
+                "test_connection",
+                "no_token",
+                details="Попытка тестирования подключения без токена"
+            )
             raise HTTPException(status_code=400, detail="Нет валидного access token")
         
         # Пробуем получить резюме пользователя
         resumes = await hh_client.get_user_resumes(access_token)
+        
+        # Логируем успешное подключение
+        await auto_apply_service.log_request(
+            session,
+            "test_connection",
+            "success",
+            details=f"Подключение успешно, найдено резюме: {len(resumes)}"
+        )
+        
         return {
             "status": "success",
             "message": "Подключение к API HH.ru успешно",
             "resumes_count": len(resumes)
         }
     except Exception as e:
+        # Логируем ошибку подключения
+        await auto_apply_service.log_request(
+            session,
+            "test_connection",
+            "failed",
+            details="Попытка тестирования подключения",
+            error_message=str(e)
+        )
         raise HTTPException(status_code=400, detail=f"Ошибка подключения: {str(e)}")
 
 
@@ -164,5 +222,91 @@ async def run_single_check(background_tasks: BackgroundTasks, session: AsyncSess
                 "job_searches_processed": len(job_searches),
                 "applications_sent": total_applied
             }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/request-logs")
+async def get_request_logs(
+    limit: int = 50,
+    request_type: str = None,
+    status: str = None,
+    session: AsyncSession = Depends(get_db)
+):
+    """Получение логов запросов"""
+    try:
+        from sqlalchemy import select, desc
+        from app.database import RequestLog
+        
+        query = select(RequestLog).order_by(desc(RequestLog.created_at))
+        
+        if request_type:
+            query = query.where(RequestLog.request_type == request_type)
+        if status:
+            query = query.where(RequestLog.status == status)
+        
+        query = query.limit(limit)
+        result = await session.execute(query)
+        logs = result.scalars().all()
+        
+        return [
+            {
+                "id": log.id,
+                "job_search_id": log.job_search_id,
+                "request_type": log.request_type,
+                "status": log.status,
+                "details": log.details,
+                "error_message": log.error_message,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            }
+            for log in logs
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/system-settings")
+async def get_system_settings(session: AsyncSession = Depends(get_db)):
+    """Получение настроек системы"""
+    try:
+        settings_data = {
+            "check_interval_minutes": await auto_apply_service.get_check_interval(session),
+            "max_applications_per_day": await auto_apply_service.get_max_applications_per_day(session)
+        }
+        return settings_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/system-settings")
+async def update_system_settings(
+    request: Request,
+    session: AsyncSession = Depends(get_db)
+):
+    """Обновление настроек системы"""
+    try:
+        # Получаем данные из body запроса
+        body = await request.json()
+        check_interval_minutes = body.get("check_interval_minutes")
+        max_applications_per_day = body.get("max_applications_per_day")
+        
+        if check_interval_minutes is None or max_applications_per_day is None:
+            raise HTTPException(status_code=400, detail="Отсутствуют обязательные параметры")
+        
+        await auto_apply_service.update_setting(
+            session, 
+            "check_interval_minutes", 
+            str(check_interval_minutes),
+            "Интервал проверки новых вакансий в минутах"
+        )
+        
+        await auto_apply_service.update_setting(
+            session, 
+            "max_applications_per_day", 
+            str(max_applications_per_day),
+            "Максимальное количество откликов в день"
+        )
+        
+        return {"message": "Настройки обновлены"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 

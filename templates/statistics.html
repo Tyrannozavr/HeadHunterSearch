@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика - HH.ru Auto Apply</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+        }
+        .search-item {
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+        }
+        .application-item {
+            border-left: 4px solid #28a745;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+        }
+        .application-item.failed {
+            border-left-color: #dc3545;
+        }
+        .application-item.pending {
+            border-left-color: #ffc107;
+        }
+        .url-link {
+            word-break: break-all;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .url-link:hover {
+            text-decoration: underline;
+        }
+        .stats-card {
+            text-align: center;
+            padding: 20px;
+            border-radius: 15px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="main-container p-5">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="display-5 fw-bold text-primary">
+                    <i class="fas fa-chart-bar me-3"></i>Детальная статистика
+                </h1>
+                <a href="/" class="btn btn-outline-primary">
+                    <i class="fas fa-arrow-left me-2"></i>Назад
+                </a>
+            </div>
+
+            <!-- Общая статистика -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <h3 id="totalSearches">0</h3>
+                        <p class="mb-0">Активных поисков</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <h3 id="totalApplications">0</h3>
+                        <p class="mb-0">Всего откликов</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <h3 id="successApplications">0</h3>
+                        <p class="mb-0">Успешных откликов</p>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stats-card">
+                        <h3 id="failedApplications">0</h3>
+                        <p class="mb-0">Неудачных откликов</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Активные поиски -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-search me-2"></i>Активные поиски вакансий
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="searchesList">
+                                <div class="text-center text-muted">
+                                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                    <p class="mt-2">Загрузка данных...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Отклики -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-paper-plane me-2"></i>История откликов
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="applicationsList">
+                                <div class="text-center text-muted">
+                                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                    <p class="mt-2">Загрузка данных...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Загрузка данных при открытии страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            loadAllData();
+        });
+
+        // Загрузка всех данных
+        async function loadAllData() {
+            try {
+                const [searchesResponse, applicationsResponse] = await Promise.all([
+                    fetch('/api/job-searches'),
+                    fetch('/api/applications')
+                ]);
+                
+                if (searchesResponse.ok) {
+                    const searches = await searchesResponse.json();
+                    displaySearches(searches);
+                    updateSearchStats(searches);
+                }
+                
+                if (applicationsResponse.ok) {
+                    const applications = await applicationsResponse.json();
+                    displayApplications(applications);
+                    updateApplicationStats(applications);
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки данных:', error);
+                showError('Ошибка загрузки данных');
+            }
+        }
+
+        // Отображение поисков
+        function displaySearches(searches) {
+            const container = document.getElementById('searchesList');
+            
+            if (searches.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">Нет активных поисков</div>';
+                return;
+            }
+            
+            const html = searches.map(search => `
+                <div class="search-item">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6 class="fw-bold mb-2">${search.name}</h6>
+                            <p class="mb-2">
+                                <strong>Фильтры:</strong> 
+                                <a href="${search.filter_url}" target="_blank" class="url-link">${search.filter_url}</a>
+                            </p>
+                            <p class="mb-2">
+                                <strong>Сопроводительное письмо:</strong><br>
+                                <span class="text-muted">${search.cover_letter.substring(0, 100)}${search.cover_letter.length > 100 ? '...' : ''}</span>
+                            </p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <small class="text-muted">
+                                Создан: ${new Date(search.created_at).toLocaleString()}
+                            </small>
+                                                    <div class="mt-2">
+                            <span class="badge bg-success">Активен</span>
+                            <button class="btn btn-outline-danger btn-sm ms-2" onclick="deactivateSearch(${search.id})">
+                                <i class="fas fa-stop me-1"></i>Остановить
+                            </button>
+                        </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+
+        // Отображение откликов
+        function displayApplications(applications) {
+            const container = document.getElementById('applicationsList');
+            
+            if (applications.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">Нет откликов</div>';
+                return;
+            }
+            
+            const html = applications.map(app => `
+                <div class="application-item ${app.status}">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6 class="fw-bold mb-1">${app.vacancy_title}</h6>
+                            <p class="mb-1 text-muted">${app.company_name}</p>
+                            <small class="text-muted">
+                                Отклик отправлен: ${new Date(app.applied_at).toLocaleString()}
+                            </small>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <span class="badge bg-${getStatusColor(app.status)}">
+                                ${getStatusText(app.status)}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+        }
+
+        // Обновление статистики поисков
+        function updateSearchStats(searches) {
+            document.getElementById('totalSearches').textContent = searches.length;
+        }
+
+        // Обновление статистики откликов
+        function updateApplicationStats(applications) {
+            document.getElementById('totalApplications').textContent = applications.length;
+            
+            const successCount = applications.filter(app => app.status === 'success').length;
+            const failedCount = applications.filter(app => app.status === 'failed').length;
+            
+            document.getElementById('successApplications').textContent = successCount;
+            document.getElementById('failedApplications').textContent = failedCount;
+        }
+
+        // Получение цвета статуса
+        function getStatusColor(status) {
+            switch (status) {
+                case 'success': return 'success';
+                case 'failed': return 'danger';
+                case 'pending': return 'warning';
+                default: return 'secondary';
+            }
+        }
+
+        // Получение текста статуса
+        function getStatusText(status) {
+            switch (status) {
+                case 'success': return 'Успешно';
+                case 'failed': return 'Ошибка';
+                case 'pending': return 'В обработке';
+                default: return status;
+            }
+        }
+
+        // Показ ошибки
+        function showError(message) {
+            const container = document.getElementById('searchesList');
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    ${message}
+                </div>
+            `;
+        }
+
+        // Деактивация поиска
+        async function deactivateSearch(searchId) {
+            if (!confirm('Вы уверены, что хотите остановить этот поиск?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/job-searches/${searchId}/deactivate`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    showNotification('Поиск остановлен!', 'success');
+                    // Перезагружаем данные
+                    loadAllData();
+                } else {
+                    const data = await response.json();
+                    showNotification(data.detail || 'Ошибка остановки поиска', 'danger');
+                }
+            } catch (error) {
+                showNotification('Ошибка подключения к серверу', 'danger');
+            }
+        }
+
+        // Показ уведомлений
+        function showNotification(message, type) {
+            // Создаем временное уведомление
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Автоматическое удаление через 3 секунды
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 3000);
+        }
+
+        // Обновление данных каждые 30 секунд
+        setInterval(loadAllData, 30000);
+    </script>
+</body>
+</html> 

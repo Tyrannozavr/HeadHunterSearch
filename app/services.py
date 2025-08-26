@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from datetime import datetime, timedelta
-from app.database import JobSearch, Application, UserCredentials
+from app.database import JobSearch, Application, UserCredentials, RequestLog, SystemSettings
 from app.models import JobSearchCreate, HHApplicationRequest
 from app.hh_api import hh_client
 from app.config import settings
@@ -77,6 +77,58 @@ class AutoApplyService:
         await session.commit()
         await session.refresh(application)
         return application
+
+    async def log_request(self, session: AsyncSession, request_type: str, status: str, 
+                         job_search_id: int = None, details: str = None, error_message: str = None):
+        """Логирование запросов к API"""
+        log_entry = RequestLog(
+            job_search_id=job_search_id,
+            request_type=request_type,
+            status=status,
+            details=details,
+            error_message=error_message
+        )
+        session.add(log_entry)
+        await session.commit()
+
+    async def get_setting(self, session: AsyncSession, key: str, default_value: str) -> str:
+        """Получение настройки системы"""
+        result = await session.execute(
+            select(SystemSettings).where(SystemSettings.key == key)
+        )
+        setting = result.scalar_one_or_none()
+        return setting.value if setting else default_value
+
+    async def update_setting(self, session: AsyncSession, key: str, value: str, description: str = None):
+        """Обновление настройки системы"""
+        result = await session.execute(
+            select(SystemSettings).where(SystemSettings.key == key)
+        )
+        setting = result.scalar_one_or_none()
+        
+        if setting:
+            setting.value = value
+            if description:
+                setting.description = description
+        else:
+            setting = SystemSettings(
+                key=key,
+                value=value,
+                description=description
+            )
+            session.add(setting)
+        
+        await session.commit()
+
+    async def get_check_interval(self, session: AsyncSession) -> int:
+        """Получение интервала проверки в минутах"""
+        interval_str = await self.get_setting(session, "check_interval_minutes", str(settings.check_interval_minutes))
+        return int(interval_str)
+
+    async def get_max_applications_per_day(self, session: AsyncSession) -> int:
+        """Получение максимального количества откликов в день"""
+        max_app_str = await self.get_setting(session, "max_applications_per_day", str(settings.max_applications_per_day))
+        return int(max_app_str)
     
     async def process_job_search(self, session: AsyncSession, job_search: JobSearch) -> int:
         """Обработка одного поиска работы - поиск и отклик на вакансии"""
@@ -86,6 +138,13 @@ class AutoApplyService:
         access_token = await hh_client.get_access_token(session)
         if not access_token:
             print("Нет валидного access token")
+            await self.log_request(
+                session, 
+                "search_vacancies", 
+                "no_token", 
+                job_search.id, 
+                f"Поиск: {job_search.name}"
+            )
             return 0
         
         # Получаем резюме пользователя
@@ -100,6 +159,15 @@ class AutoApplyService:
         try:
             # Ищем вакансии
             vacancies_response = await hh_client.search_vacancies(job_search.filter_url, access_token)
+            
+            # Логируем успешный поиск
+            await self.log_request(
+                session,
+                "search_vacancies",
+                "success",
+                job_search.id,
+                f"Найдено вакансий: {len(vacancies_response.items)}, Поиск: {job_search.name}"
+            )
             
             for vacancy in vacancies_response.items:
                 # Проверяем, не откликались ли уже
@@ -130,6 +198,15 @@ class AutoApplyService:
                     # Отправляем отклик
                     application_response = await hh_client.apply_to_vacancy(application_request, access_token)
                     
+                    # Логируем успешный отклик
+                    await self.log_request(
+                        session,
+                        "apply_vacancy",
+                        "success",
+                        job_search.id,
+                        f"Вакансия: {vacancy.name}, Компания: {vacancy.employer.get('name', 'Неизвестная компания')}"
+                    )
+                    
                     # Сохраняем в базу
                     await self.save_application(
                         session=session,
@@ -148,6 +225,17 @@ class AutoApplyService:
                     
                 except Exception as e:
                     print(f"Ошибка отклика на вакансию {vacancy.id}: {e}")
+                    
+                    # Логируем ошибку отклика
+                    await self.log_request(
+                        session,
+                        "apply_vacancy",
+                        "failed",
+                        job_search.id,
+                        f"Вакансия: {vacancy.name}",
+                        str(e)
+                    )
+                    
                     # Сохраняем неудачный отклик
                     await self.save_application(
                         session=session,
@@ -185,8 +273,11 @@ class AutoApplyService:
                         else:
                             print("Новых вакансий для отклика не найдено")
                 
+                # Получаем настраиваемый интервал
+                check_interval = await self.get_check_interval(session)
+                
                 # Ждем следующего цикла
-                await asyncio.sleep(settings.check_interval_minutes * 60)
+                await asyncio.sleep(check_interval * 60)
                 
             except Exception as e:
                 print(f"Ошибка в цикле автоматического отклика: {e}")
