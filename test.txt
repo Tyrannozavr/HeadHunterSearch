@@ -1,0 +1,1096 @@
+я тебе сейчас буду скидывтаь отрывки из документации апи hh убедись что работаешь в соответсвии с ней, т.к. пользователь проходит авторизацию, а потом уже начинается поиск. Токен приложения и токен доступа пользователя это я как понял разные вещи - Авторизация пользователя
+Для выполнения запросов от имени пользователя необходимо пользоваться токеном пользователя.
+
+В начале приложению необходимо направить пользователя (открыть страницу) по адресу:
+
+https://hh.ru/oauth/authorize?
+response_type=code&
+client_id={client_id}&
+state={state}&
+redirect_uri={redirect_uri}
+Обязательные параметры:
+
+response_type=code — указание на способ получения авторизации, используя authorization code
+client_id — идентификатор, полученный при создании приложения
+Необязательные параметры:
+
+state — в случае указания, будет включен в ответный редирект. Это позволяет исключить возможность взлома путём подделки межсайтовых запросов. Подробнее об этом: RFC 6749. Section 10.12
+redirect_uri — uri для перенаправления пользователя после авторизации. Если не указать, используется из настроек приложения. При наличии происходит валидация значения. Вероятнее всего, потребуется сделать urlencode значения параметра.
+Правила формирования специального redirect_uri
+К примеру, если в настройках сохранен http://example.com/oauth, то разрешено указывать:
+
+http://www.example.com/oauth — поддомен;
+http://www.example.com/oauth/sub/path — уточнение пути;
+http://example.com/oauth?lang=RU — дополнительный параметр;
+http://www.example.com/oauth/sub/path?lang=RU — всё вместе.
+Запрещено:
+
+https://example.com/oauth — различные протоколы;
+http://wwwexample.com/oauth — различные домены;
+http://wwwexample.com/ — другой путь;
+http://example.com/oauths — другой путь;
+http://example.com:80/oauths — указание изначально отсутствующего порта;
+Процесс авторизации
+Если пользователь не авторизован на сайте, ему будет показана форма авторизации на сайте. После прохождения авторизации на сайте, пользователю будет выведена форма с запросом разрешения доступа вашего приложения к его персональным данным.
+
+Если пользователь не разрешает доступ приложению, пользователь будет перенаправлен на указанный redirect_uri с ?error=access_denied и state={state}, если таковой был указан при первом запросе.
+
+
+Успешное получение временного authorization_code
+В случае разрешения прав, в редиректе будет указан временный authorization_code:
+
+HTTP/1.1 302 FOUND
+Location: {redirect_uri}?code={authorization_code}
+Если пользователь авторизован на сайте и доступ данному приложению однажды ранее выдан, ответом будет сразу вышеописанный редирект с authorization_code (без показа формы логина и выдачи прав).
+
+Получение access и refresh токенов
+После получения authorization_code приложению необходимо сделать сервер-сервер запрос POST https://api.hh.ru/token для обмена полученного authorization_code на access_token (старый запрос POST https://hh.ru/oauth/token считается устаревшим).
+
+В теле запроса необходимо передать дополнительные параметры.
+
+Тело запроса необходимо передавать в стандартном application/x-www-form-urlencoded с указанием соответствующего заголовка Content-Type.
+
+authorization_code имеет довольно короткий срок жизни, при его истечении необходимо запросить новый.
+
+Обновление пары access и refresh токенов
+access_token также имеет срок жизни (ключ expires_in, в секундах), при его истечении приложение должно сделать запрос с refresh_token для получения нового.
+
+Запрос необходимо делать в application/x-www-form-urlencoded.
+
+POST https://api.hh.ru/token
+(старый запрос POST https://hh.ru/oauth/token считается устаревшим)
+
+В теле запроса необходимо передать дополнительные параметры
+
+refresh_token можно использовать только один раз и только по истечению срока действия access_token.
+
+После получения новой пары access и refresh токенов, их необходимо использовать в дальнейших запросах в api и запросах на продление токена.
+
+Запрос авторизации под другим пользователем
+Возможен следующий сценарий:
+
+Приложение перенаправляет пользователя на сайт с запросом авторизации.
+Пользователь на сайте уже авторизован и данному приложение доступ уже был разрешен.
+Пользователю будет предложена возможность продолжить работу под текущим аккаунтом, либо зайти под другим аккаунтом.
+Если есть необходимость, чтобы на шаге 3 сразу происходило перенаправление (redirect) с временным токеном, необходимо добавить к запросу /oauth/authorize... параметр skip_choose_account=true. В этом случае автоматически выдаётся доступ пользователю авторизованному на сайте.
+
+Если есть необходимость всегда показывать форму авторизации, приложение может добавить к запросу /oauth/authorize... параметр force_login=true. В этом случае, пользователю будет показана форма авторизации с логином и паролем даже в случае, если пользователь уже авторизован.
+
+Это может быть полезно приложениям, которые предоставляют сервис только для соискателей. Если пришел пользователь-работодатель, приложение может предложить пользователю повторно разрешить доступ на сайте, уже указав другую учетную запись.
+
+Также, после авторизации приложение может показать пользователю сообщение:
+
+Вы вошли как %Имя_Фамилия%. Это не вы?
+и предоставить ссылку с force_login=true для возможности захода под другим логином.
+
+Авторизация под разными рабочими аккаунтами
+Для получения списка рабочих аккаунтов менеджера и для работы под разными рабочими аккаунтами менеджера необходимо прочитать документацию по рабочим аккаунтам менеджера
+
+В случае компрометации токена необходимо инвалидировать скомпрометированный токен и запросить токен заново!
+
+OauthToken
+Токен доступа для авторизации, передаваемый в заголовке в формате Authorization: Bearer {ACCESS_TOKEN} (см. Авторизация)
+
+Security Scheme Type: HTTP
+HTTP Authorization Scheme: bearer
+Авторизация соискателя
+Методы для получение токена пользователя
+
+Получение access-токена
+Authorizations:
+OauthToken
+Request Body schema: application/x-www-form-urlencoded
+required
+В зависимости от способа получения токена grant_type необходимо передавать различные наборы параметров
+
+One of Параметры для получения токена пользователяПараметры для обновление пары access и refresh токеновПараметры для получения нового токена приложения
+client_id
+required
+string non-empty
+Идентификатор, полученный при создании приложения
+
+client_secret
+required
+string non-empty
+Защищенный ключ, полученный при создании приложения
+
+code
+required
+string non-empty
+Значение authorization_code, полученное при перенаправлении пользователя
+
+grant_type
+required
+string
+Value: "authorization_code"
+Способ запроса токена
+
+redirect_uri
+required
+string non-empty
+Uri для перенаправления пользователя после авторизации. Если не указать, используется из настроек приложения. При наличии происходит валидация значения. Вероятнее всего, потребуется сделать urlencode значения параметра
+
+Responses
+200
+Успешный ответ
+
+400
+Ошибка параметров запроса
+
+403
+Действие запрещено
+
+
+post
+/oauth/token
+Request samples
+Payload
+Content type
+application/x-www-form-urlencoded
+Example
+
+authorization_code
+authorization_code
+
+Copy
+grant_type=authorization_code&client_id=ETVQdMs2n9VKw7SMXkh9nX5H&client_secret=95dNjB8FmtxQsmygm6dtEy53&redirect_uri=http%3A%2F%2Fwww.example.com%2Foauth&code=29CtxMcaA8pRFDYyC8e8Gkm4
+Response samples
+200400403
+Content type
+application/json
+Example
+
+user auth
+user auth
+
+Copy
+{
+"access_token": "exampleAccessTokenRandomSymbols012345678900000000000000000000000",
+"token_type": "bearer",
+"expires_in": 1209600,
+"refresh_token": "exampleRefreshTokenRandomSymbols01234567890000000000000000000000"
+}
+Инвалидация токена
+Инвалидация работает только на действующем access-токене. После инвалидации токен нельзя будет запросить с помощью refresh-токена - для работы необходимо будет заново авторизоваться в API Таким образом нельзя инвалидировать токен приложения . В случае компрометации токена необходимо инвалидировать скомпрометированный токен и запросить токен заново!
+
+Authorizations:
+OauthToken
+Responses
+204
+Успешный ответ
+
+403
+Запрос выполнен не с авторизацией пользователя
+
+
+delete
+/oauth/token
+
+Response samples
+403
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"request_id": "q1ww2e2r4ty",
+"description": "Forbidden",
+"errors": [
+{}
+],
+"oauth_error": "token-revoked"
+}
+Резюме. Работа с телефоном
+Действия с резюме соискателя связанные с отправкой/получением информации на его телефон
+
+Подтвердить телефон кодом
+Authorizations:
+OauthToken
+query Parameters
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Request Body schema: application/x-www-form-urlencoded
+phone
+required
+string
+Телефон который надо подтвердить
+
+confirmation_code
+required
+string
+Код для подтверждения
+
+Responses
+200
+Успешный ответ, номер верифицирован
+
+400
+Ошибки в аргументах
+
+403
+Ошибка авторизации
+
+
+post
+/resume_phone_confirm
+
+Response samples
+400403
+Content type
+application/json
+Example
+
+Ошибки в параметрах запроса
+Ошибки в параметрах запроса
+
+Copy
+Expand allCollapse all
+{
+"request_id": "q1ww2e2r4ty",
+"bad_argument": "string",
+"bad_arguments": [
+{}
+],
+"description": "string",
+"errors": [
+{}
+]
+}
+Получить информацию о телефоне соискателя
+Authorizations:
+OauthToken
+query Parameters
+phone
+required
+string
+Номер телефона в любом формате
+
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Responses
+200
+Успешный ответ
+
+400
+Ошибки в аргументах
+
+403
+Ошибка авторизации
+
+
+get
+/resume_should_send_sms
+
+Response samples
+200400403
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"phone": {
+"city": "929",
+"country": "7",
+"formatted": "+7 (929) 667-21-67",
+"need_verification": false,
+"number": "6672167",
+"restricted_country": false,
+"verified": true
+}
+}
+Отправить код подтверждения для телефона резюме
+Authorizations:
+OauthToken
+query Parameters
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Request Body schema: application/x-www-form-urlencoded
+phone
+required
+string
+Телефон на который надо отправить подтверждающий код
+
+Responses
+201
+Успешно отправлено
+
+400
+Ошибки в аргументах
+
+403
+Ошибка авторизации
+
+ - выбери что больше подходит. Поиск вакансий для соискателя
+Методы поиска вакансий, доступные соискателю
+
+Поиск по вакансиям, похожим на резюме
+Данные доступны только автору резюме.
+
+При указании параметров пагинации (page, per_page) работает ограничение: глубина возвращаемых результатов не может быть больше 2000. Например, возможен запрос per_page=10&page=199 (выдача с 1991 по 2000 вакансию), но запрос с per_page=10&page=200 вернёт ошибку (выдача с 2001 по 2010 вакансию)
+
+Authorizations:
+OauthToken
+path Parameters
+resume_id
+required
+string
+Идентификатор резюме
+
+query Parameters
+page
+number
+Номер страницы (считается от 0, по умолчанию - 0)
+
+per_page
+number
+Количество элементов (по умолчанию - 10, максимальное значение - 100)
+
+text
+string
+Переданное значение ищется в полях вакансии, указанных в параметре search_field. Доступен язык запросов. Специально для этого поля есть автодополнение
+
+search_field
+string
+Область поиска. Справочник с возможными значениями: vacancy_search_fields в /dictionaries. По умолчанию, используются все поля. Можно указать несколько значений
+
+experience
+string
+Опыт работы. Необходимо передавать id из справочника experience в /dictionaries. Можно указать несколько значений
+
+employment
+string
+Тип занятости. Необходимо передавать id из справочника employment в /dictionaries. Можно указать несколько значений
+
+schedule
+string
+График работы. Необходимо передавать id из справочника schedule в /dictionaries. Можно указать несколько значений
+
+area
+string
+Регион. Необходимо передавать id из справочника /areas. Можно указать несколько значений
+
+metro
+string
+Ветка или станция метро. Необходимо передавать id из справочника /metro. Можно указать несколько значений
+
+professional_role
+string
+Профессиональная область. Необходимо передавать id из справочника /professional_roles
+
+industry
+string
+Индустрия компании, разместившей вакансию. Необходимо передавать id из справочника /industries. Можно указать несколько значений
+
+employer_id
+string
+Идентификатор работодателя. Можно указать несколько значений
+
+excluded_employer_id
+string
+Идентификатор работодателя, вакансии которого должны быть исключены из выдачи. Можно указать несколько значений
+
+currency
+string
+Код валюты. Справочник с возможными значениями: currency (ключ code) в /dictionaries. Имеет смысл указывать только совместно с параметром salary
+
+salary
+number
+Размер заработной платы. Если указано это поле, но не указано currency, то для currency используется значение RUR. При указании значения будут найдены вакансии, в которых вилка зарплаты близка к указанной в запросе. При этом значения пересчитываются по текущим курсам ЦБ РФ. Например, при указании salary=100&currency=EUR будут найдены вакансии, где вилка зарплаты указана в рублях и после пересчёта в Евро близка к 100 EUR. По умолчанию будут также найдены вакансии, в которых вилка зарплаты не указана, чтобы такие вакансии отфильтровать, используйте only_with_salary=true
+
+label
+string
+Фильтр по меткам вакансий. Необходимо передавать id из справочника vacancy_label в /dictionaries. Можно указать несколько значений
+
+only_with_salary
+boolean
+Показывать вакансии только с указанием зарплаты. По умолчанию false
+
+period
+number
+Количество дней, в пределах которых производится поиск по вакансиям
+
+date_from
+string
+Дата, которая ограничивает снизу диапазон дат публикации вакансий. Нельзя передавать вместе с параметром period. Значение указывается в формате ISO 8601 - YYYY-MM-DD или с точность до секунды YYYY-MM-DDThh:mm:ss±hhmm. Указанное значение будет округлено до ближайших пяти минут
+
+date_to
+string
+Дата, которая ограничивает сверху диапазон дат публикации вакансий. Нельзя передавать вместе с параметром period. Значение указывается в формате ISO 8601 - YYYY-MM-DD или с точность до секунды YYYY-MM-DDThh:mm:ss±hhmm. Указанное значение будет округлено до ближайших пяти минут
+
+top_lat
+number
+Верхняя граница широты. При поиске используется значение указанного в вакансии адреса. Принимаемое значение — градусы в виде десятичной дроби. Необходимо передавать одновременно все четыре параметра гео-координат, иначе вернется ошибка
+
+bottom_lat
+number
+Нижняя граница широты. При поиске используется значение указанного в вакансии адреса. Принимаемое значение — градусы в виде десятичной дроби. Необходимо передавать одновременно все четыре параметра гео-координат, иначе вернется ошибка
+
+left_lng
+number
+Левая граница долготы. При поиске используется значение указанного в вакансии адреса. Принимаемое значение — градусы в виде десятичной дроби. Необходимо передавать одновременно все четыре параметра гео-координат, иначе вернется ошибка
+
+right_lng
+number
+Правая граница долготы. При поиске используется значение указанного в вакансии адреса. Принимаемое значение — градусы в виде десятичной дроби. Необходимо передавать одновременно все четыре параметра гео-координат, иначе вернется ошибка
+
+order_by
+string
+Сортировка списка вакансий. Справочник с возможными значениями: vacancy_search_order в /dictionaries. Если выбрана сортировка по удалённости от гео-точки distance, необходимо также задать её координаты: sort_point_lat, sort_point_lng
+
+sort_point_lat
+number
+Значение географической широты точки, по расстоянию от которой будут отсортированы вакансии. Необходимо указывать только, если order_by установлено в distance
+
+sort_point_lng
+number
+Значение географической долготы точки, по расстоянию от которой будут отсортированы вакансии. Необходимо указывать только, если order_by установлено в distance
+
+clusters
+boolean
+Возвращать ли кластеры для данного поиска. По умолчанию — false
+
+describe_arguments
+boolean
+Возвращать ли описание использованных параметров поиска. Успешный ответ будет содержать поле arguments). По умолчанию — false
+
+no_magic
+boolean
+Если значение true — автоматическое преобразование вакансий отключено. По умолчанию – false. При включённом автоматическом преобразовании, будет предпринята попытка изменить текстовый запрос пользователя на набор параметров. Например, запрос text=москва бухгалтер 100500 будет преобразован в text=бухгалтер&only_with_salary=true&area=1&salary=100500
+
+premium
+boolean
+Если значение true — в сортировке вакансий будет учтены премиум вакансии. Такая сортировка используется на сайте. По умолчанию — false
+
+responses_count_enabled
+boolean
+Если значение true — дополнительное поле counters с количеством откликов для вакансии включено. По-умолчанию — false
+
+part_time
+string
+Вакансии для подработки. Возможные значения:
+
+Все элементы из working_days в /dictionaries.
+Все элементы из working_time_intervals в /dictionaries.
+Все элементы из working_time_modes в /dictionaries.
+Элементы part или project из employment в /dictionaries.
+Элемент accept_temporary, показывает вакансии только с временным трудоустройством. Можно указать несколько значений
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Responses
+200
+Успешный ответ
+
+Response Schema: application/json
+items
+required
+Array of objects (Вакансия) >= 0 items
+Список вакансий
+
+Array (>= 0 items)
+accept_incomplete_resumes
+required
+boolean (Неполное резюме)
+Разрешен ли отклик на вакансию неполным резюме
+
+accept_temporary
+boolean or null (Временное трудоустройство)
+Указание, что вакансия доступна с временным трудоустройством
+
+address
+object or null (Адрес)
+Адрес
+
+alternate_url
+required
+string
+Ссылка на представление вакансии на сайте
+
+apply_alternate_url
+required
+string
+Ссылка на отклик на вакансию на сайте
+
+archived
+boolean or null
+Находится ли данная вакансия в архиве
+
+area
+required
+object (Регион)
+contacts
+object or null (Контактная информация)
+Контактная информация
+
+created_at
+string
+Дата и время публикации вакансии
+
+department
+required
+(Департамент (object or null)) or (Null-объект (object or null)) (Объект)
+Департамент
+
+employer
+required
+object (Информация о компании работодателя)
+fly_in_fly_out_duration
+Array of objects or null or null (Варианты длительности вахты)
+Варианты длительности вахты
+
+has_test
+required
+boolean
+Информация о наличии прикрепленного тестового задании к вакансии
+
+id
+required
+string
+Идентификатор вакансии
+
+insider_interview
+(Объект с информацией об интервью о жизни в компании (object or null)) or (Null-объект (object or null)) (Объект)
+Объект с информацией об интервью о жизни в компании
+
+internship
+boolean or null (Стажировка)
+Стажировка
+
+metro_stations
+object (Станция метро)
+name
+required
+string (Название)
+Название
+
+night_shifts
+boolean or null (Ночные смены)
+Ночные смены
+
+premium
+boolean or null
+Является ли данная вакансия премиум-вакансией
+
+professional_roles
+required
+Array of objects (Профессиональные роли)
+Список профессиональных ролей
+
+published_at
+required
+string
+Дата и время публикации вакансии
+
+relations
+required
+Array of strings or null (Связи соискателя с вакансией)
+Items Enum: "favorited" "got_response" "got_invitation" "got_rejection" "blacklisted" null
+Возвращает связи соискателя с вакансией. Значения из поля vacancy_relation в справочнике полей
+
+response_letter_required
+required
+boolean (Сопроводительное письмо)
+Обязательно ли заполнять сообщение при отклике на вакансию
+
+response_url
+string or null (URL)
+URL отклика для прямых вакансий (type.id=direct)
+
+salary
+required
+object or null (Зарплата)
+Deprecated
+Зарплата
+
+salary_range
+required
+(Зарплата (object or null)) or (Null-объект (object or null))
+schedule
+(График работы (object or null)) or (Null-объект (object or null))
+Deprecated
+show_contacts
+boolean or null (Доступны ли контакты в вакансии)
+Доступны ли контакты в вакансии
+
+sort_point_distance
+number or null (Расстояние между центром сортировки и указанным в вакансии адресом)
+Расстояние в метрах между центром сортировки (заданной параметрами sort_point_lat, sort_point_lng) и указанным в вакансии адресом. В случае, если в адресе указаны только станции метро, выдается расстояние между центром сортировки и средней геометрической точкой указанных станций.
+
+Значение sort_point_distance выдается только в случае, если заданы параметры sort_point_lat, sort_point_lng, order_by=distance
+
+type
+required
+object (Тип вакансии)
+Тип вакансии
+
+id
+required
+string
+Тип из справочника vacancy_type
+
+name
+string
+Название типа вакансии
+
+url
+required
+string
+URL вакансии
+
+work_format
+Array of objects or null or null (Форматы работы)
+Список форматов работы
+
+Array
+id
+string
+Элементы из справочника work_format
+
+name
+string
+Название формата работы
+
+work_schedule_by_days
+Array of objects or null or null (Графики работы)
+Список графиков работы
+
+Array
+id
+string
+Элементы из справочника work_schedule_by_days
+
+name
+string
+Название графика работы
+
+working_days
+Array of objects or null or null (Список рабочих дней)
+Deprecated
+Список рабочих дней
+
+working_hours
+Array of objects or null or null (Варианты рабочих часов в день)
+Список вариантов рабочих часов в день
+
+Array
+id
+string
+Элементы из справочника working_hours
+
+name
+string
+Название варианта рабочих часов в день
+
+working_time_intervals
+Array of objects or null or null (Интервалы работы)
+Deprecated
+Список с временными интервалами работы
+
+working_time_modes
+Array of objects or null or null (Режимы работы)
+Deprecated
+Список режимов времени работы
+
+counters
+object (Счетчики)
+Число откликов на вакансию. Доступно для соискательской авторизации и авторизации приложения при использовании параметра responses_count_enabled=true
+
+employment
+object or null (Тип занятости)
+Deprecated
+employment_form
+object or null (Тип занятости)
+experience
+object or null (Опыт работы)
+snippet
+required
+object (Дополнительные текстовые отрывки)
+show_logo_in_search
+boolean or null
+Отображать ли лого для вакансии в поисковой выдаче
+
+video_vacancy
+(Видео вакансия (object or null)) or (Null-объект (object or null))
+found
+required
+integer
+Найдено результатов
+
+page
+required
+integer
+Номер страницы
+
+pages
+required
+integer
+Всего страниц
+
+per_page
+required
+integer
+Результатов на странице
+
+clusters
+Array of objects or null (Кластер)
+Массив кластеров поиска
+
+arguments
+Array of objects or null (Аргумент поиска)
+Массив параметров поиска, переданных в запросе.
+
+Возвращается только если в запросе передан параметр describe_arguments=true. В массиве выдаются только те параметры, которые влияют на поиск вакансий. Неизвестные параметры игнорируются. Элемент списка с одним значением argument может повторяться несколько раз, если параметр имеет несколько значений
+
+alternate_url
+string or null
+Ссылка на вакансию
+
+fixes
+object or null (Исправления применённые к тексту запроса)
+suggests
+object or null (Исправления предложенные для текста запроса)
+400
+Параметры переданы с ошибкой
+
+404
+Указанное резюме не существует или у текущего пользователя нет доступа
+
+
+Отклик на вакансию
+Запрос позволяет пользователю откликнуться на вакансию.
+
+Чтобы узнать, какими резюме возможно откликнуться на конкретную вакансию, воспользуйтесь списком подходящих резюме
+
+Authorizations:
+OauthToken
+query Parameters
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Request Body schema: multipart/form-data
+required
+message
+string or null
+Сопроводительное письмо к отклику.
+
+Является обязательным, если в вакансии указано, что обязательно сопроводительное письмо.
+
+Максимальная длина — 10000 символов
+
+resume_id
+required
+string
+Идентификатор резюме, которым производится отклик
+
+vacancy_id
+required
+string
+Идентификатор вакансии, на которую происходит отклик
+
+Responses
+201
+Результат отклика на обычную вакансию
+
+Response Headers
+Location
+string
+Путь к созданному отклику. Пример: /negotiations/123, где 123 — nid созданного отклика
+
+Response Schema: text/html
+string
+303
+Результат отклика на вакансию с прямым откликом
+
+Response Headers
+Location
+string
+Содержит внешний URL на сайт работодателя. Пример: http://example.com/respond/vacancy. Используйте этот URL, чтобы предложить пользователю откликнуться на вакансию на сайте работодателя вместо стандартного механизма откликов
+
+Response Schema: text/html
+string
+400
+Ошибка в параметрах запроса
+
+Response Schema: application/json
+Any of Ошибки отклика на вакансиюОшибки в параметрах запроса
+request_id
+required
+string
+Идентификатор запроса
+
+bad_argument
+string
+Deprecated
+Enum: "vacancy_id" "resume_id"
+bad_arguments
+Array of objects
+Deprecated
+description
+string
+Описание ошибки
+
+errors
+required
+Array of objects (Ошибка в параметре запроса) non-empty
+Массив с данными ошибок
+
+403
+Невозможно откликнуться на вакансию
+
+Response Schema: application/json
+One of Ошибки при отклике на вакансиюОбщие ошибки авторизации
+request_id
+required
+string
+Идентификатор запроса
+
+bad_argument
+string
+Deprecated
+Enum: "vacancy_id" "resume_id"
+bad_arguments
+Array of objects
+Deprecated
+description
+string
+Описание ошибки
+
+errors
+required
+Array of objects (Ошибка при отклике/приглашении на вакансию) non-empty
+Массив с данными ошибок
+
+
+post
+/negotiations
+
+Response samples
+400403
+Content type
+application/json
+Example
+
+Ошибки отклика на вакансию
+Ошибки отклика на вакансию
+
+Copy
+Expand allCollapse all
+{
+"request_id": "q1ww2e2r4ty",
+"bad_argument": "vacancy_id",
+"bad_arguments": [
+{}
+],
+"description": "string",
+"errors": [
+{}
+]
+}
+Скрытые вакансии
+Список скрытых вакансий
+Возвращает подмножество вакансий, скрытых пользователем, а также один дополнительный параметр
+
+Authorizations:
+OauthToken
+query Parameters
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Responses
+200
+Успешный ответ
+
+Response Schema: application/json
+found
+required
+integer
+Найдено результатов
+
+page
+required
+integer
+Номер страницы
+
+pages
+required
+integer
+Всего страниц
+
+per_page
+required
+integer
+Результатов на странице
+
+items
+Array of objects (Скрытая вакансия)
+Массив скрытых вакансий
+
+limit_reached
+boolean
+Превышено ли максимальное количество элементов в списке
+
+403
+Текущий пользователь не является соискателем
+
+
+get
+/vacancies/blacklisted
+
+Response samples
+200403
+Content type
+application/json
+
+Copy
+Expand allCollapse all
+{
+"found": 1,
+"items": [
+{}
+],
+"limit_reached": false,
+"page": 0,
+"pages": 1,
+"per_page": 20
+}
+Добавление вакансии в список скрытых
+Добавляет указанную вакансию в список скрытых вакансий
+
+Authorizations:
+OauthToken
+path Parameters
+vacancy_id
+required
+string
+Идентификатор вакансии
+
+query Parameters
+locale
+string
+Default: "RU"
+Example: locale=EN
+Идентификатор локали (см. Локализация)
+
+host
+string
+Default: "hh.ru"
+Enum: "hh.ru" "rabota.by" "hh1.az" "hh.uz" "hh.kz" "headhunter.ge" "headhunter.kg"
+Example: host=hh.ru
+Доменное имя сайта (см. Выбор сайта)
+
+header Parameters
+HH-User-Agent
+required
+string
+Example: MyApp/1.0 (my-app-feedback@example.com)
+Название приложения и контактная почта разработчика (см. Информация о клиенте)
+
+Responses
+еще реализуй многопользовательский режим, не знаю как, сделай форму какую нибудь входа и опиши общение с hh отдельным слоем например utils и типы в pydantic

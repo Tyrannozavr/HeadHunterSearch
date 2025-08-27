@@ -90,6 +90,31 @@
                     <i class="fas fa-robot me-3"></i>HH.ru Auto Apply
                 </h1>
                 <p class="lead text-muted">Автоматический отклик на вакансии через API HH.ru</p>
+                
+                <!-- Информация о пользователе -->
+                <div id="userInfo" class="d-none">
+                    <div class="alert alert-info d-inline-block">
+                        <i class="fas fa-user me-2"></i>
+                        <span id="username"></span>
+                        <button class="btn btn-outline-danger btn-sm ms-3" onclick="logout()">
+                            <i class="fas fa-sign-out-alt me-1"></i>Выйти
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Форма входа -->
+                <div id="loginForm" class="d-none">
+                    <div class="alert alert-warning d-inline-block">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Для работы с приложением необходимо войти в систему
+                        <a href="/login" class="btn btn-primary btn-sm ms-3">
+                            <i class="fas fa-sign-in-alt me-1"></i>Войти
+                        </a>
+                        <a href="/register" class="btn btn-outline-primary btn-sm ms-2">
+                            <i class="fas fa-user-plus me-1"></i>Регистрация
+                        </a>
+                    </div>
+                </div>
             </div>
 
             <!-- Статус системы -->
@@ -127,26 +152,32 @@
                             </h5>
                         </div>
                         <div class="card-body">
-                            <form id="setupForm">
-                                <!-- Учетные данные -->
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">
-                                        <i class="fas fa-key me-1"></i>Access Token HH.ru
-                                    </label>
-                                    <input type="password" class="form-control" id="accessToken" 
-                                           placeholder="Введите ваш access token">
-                                    <div class="form-text">
-                                        Получите токен в <a href="https://dev.hh.ru/admin" target="_blank">личном кабинете разработчика</a>
-                                    </div>
+                            <!-- Статус подключения HH.ru -->
+                            <div id="hhConnectionStatus" class="mb-3">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <span id="hhStatusText">Проверка подключения...</span>
                                 </div>
+                            </div>
 
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold">
-                                        <i class="fas fa-id-card me-1"></i>ID резюме
-                                    </label>
-                                    <input type="text" class="form-control" id="resumeId" 
-                                           placeholder="ID вашего резюме">
+                            <!-- Кнопка подключения HH.ru -->
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-primary btn-lg w-100" id="connectHHBtn" onclick="connectHH()">
+                                    <i class="fas fa-link me-2"></i>Подключить HH.ru
+                                </button>
+                                <div class="form-text text-center">
+                                    Автоматическая авторизация через OAuth 2.0
                                 </div>
+                            </div>
+
+                            <!-- Информация о резюме -->
+                            <div id="resumeInfo" class="mb-3 d-none">
+                                <div class="alert alert-success">
+                                    <i class="fas fa-check-circle me-2"></i>
+                                    <strong>Резюме подключено:</strong>
+                                    <span id="resumeTitle"></span>
+                                </div>
+                            </div>
 
                                 <div class="mb-3">
                                     <label class="form-label fw-bold">
@@ -168,16 +199,13 @@
                                 </div>
 
                                 <div class="d-grid gap-2">
-                                    <button type="button" class="btn btn-primary" onclick="saveCredentials()">
-                                        <i class="fas fa-save me-1"></i>Сохранить учетные данные
-                                    </button>
-                                    <button type="button" class="btn btn-success" onclick="createJobSearch()">
+                                    <button type="button" class="btn btn-success" onclick="createJobSearch()" id="createSearchBtn" disabled>
                                         <i class="fas fa-plus me-1"></i>Создать поиск
                                     </button>
-                                    <button type="button" class="btn btn-info" onclick="testConnection()">
+                                    <button type="button" class="btn btn-info" onclick="testConnection()" id="testConnectionBtn" disabled>
                                         <i class="fas fa-plug me-1"></i>Тест подключения
                                     </button>
-                                    <button type="button" class="btn btn-warning" onclick="runSingleCheck()">
+                                    <button type="button" class="btn btn-warning" onclick="runSingleCheck()" id="runSingleCheckBtn" disabled>
                                         <i class="fas fa-search me-1"></i>Проверить сейчас
                                     </button>
                                 </div>
@@ -239,13 +267,74 @@
     <script>
         // Глобальные переменные
         let isRunning = false;
+        let currentUser = null;
 
         // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
-            updateStatus();
-            loadStatistics();
-            loadApplications();
+            checkAuth();
+            // Проверяем статус HH.ru через 1 секунду после загрузки
+            setTimeout(checkHHConnectionOnLoad, 1000);
         });
+        
+        // Проверка аутентификации
+        async function checkAuth() {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                try {
+                    const response = await fetch('/api/auth/me', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const user = await response.json();
+                        currentUser = user;
+                        showUserInfo(user);
+                        updateStatus();
+                        loadStatistics();
+                        loadApplications();
+                    } else {
+                        // Токен недействителен
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('user_id');
+                        showLoginForm();
+                    }
+                } catch (error) {
+                    console.error('Ошибка проверки аутентификации:', error);
+                    showLoginForm();
+                }
+            } else {
+                showLoginForm();
+            }
+        }
+        
+        // Показать информацию о пользователе
+        function showUserInfo(user) {
+            document.getElementById('userInfo').classList.remove('d-none');
+            document.getElementById('loginForm').classList.add('d-none');
+            document.getElementById('username').textContent = user.username;
+            
+            // Показываем все формы и функциональность
+            document.querySelectorAll('.auth-required').forEach(el => el.classList.remove('d-none'));
+        }
+        
+        // Показать форму входа
+        function showLoginForm() {
+            document.getElementById('userInfo').classList.add('d-none');
+            document.getElementById('loginForm').classList.remove('d-none');
+            
+            // Скрываем все формы и функциональность
+            document.querySelectorAll('.auth-required').forEach(el => el.classList.add('d-none'));
+        }
+        
+        // Выход из системы
+        function logout() {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('user_id');
+            currentUser = null;
+            showLoginForm();
+        }
 
         // Обновление статуса
         async function updateStatus() {
@@ -303,37 +392,7 @@
             }
         }
 
-        // Сохранение учетных данных
-        async function saveCredentials() {
-            const accessToken = document.getElementById('accessToken').value;
-            const resumeId = document.getElementById('resumeId').value;
-            
-            if (!accessToken) {
-                showNotification('Введите access token', 'warning');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/credentials', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        access_token: accessToken,
-                        resume_id: resumeId || null
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    showNotification('Учетные данные сохранены!', 'success');
-                } else {
-                    showNotification(data.detail || 'Ошибка сохранения', 'danger');
-                }
-            } catch (error) {
-                showNotification('Ошибка подключения к серверу', 'danger');
-            }
-        }
+
 
         // Создание поиска работы
         async function createJobSearch() {
@@ -346,12 +405,24 @@
             }
             
             try {
+                // Парсим URL для извлечения параметров поиска
+                const url = new URL(filterUrl);
+                const searchParams = {};
+                
+                // Извлекаем параметры из URL
+                for (const [key, value] of url.searchParams.entries()) {
+                    searchParams[key] = value;
+                }
+                
                 const response = await fetch('/api/job-searches', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                    },
                     body: JSON.stringify({
                         name: 'Поиск ' + new Date().toLocaleString(),
-                        filter_url: filterUrl,
+                        search_params: searchParams,
                         cover_letter: coverLetter
                     })
                 });
@@ -375,7 +446,16 @@
         // Тест подключения
         async function testConnection() {
             try {
-                const response = await fetch('/api/test-connection', { method: 'POST' });
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    showNotification('Необходимо войти в систему', 'warning');
+                    return;
+                }
+
+                const response = await fetch('/api/test-connection', { 
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -391,7 +471,16 @@
         // Однократная проверка
         async function runSingleCheck() {
             try {
-                const response = await fetch('/api/run-single-check', { method: 'POST' });
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    showNotification('Необходимо войти в систему', 'warning');
+                    return;
+                }
+
+                const response = await fetch('/api/run-single-check', { 
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -409,9 +498,16 @@
         // Загрузка статистики
         async function loadStatistics() {
             try {
+                const token = localStorage.getItem('access_token');
+                if (!token) return;
+
                 const [searchesResponse, applicationsResponse] = await Promise.all([
-                    fetch('/api/job-searches'),
-                    fetch('/api/applications')
+                    fetch('/api/job-searches', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    }),
+                    fetch('/api/applications', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    })
                 ]);
                 
                 if (searchesResponse.ok) {
@@ -431,7 +527,12 @@
         // Загрузка откликов
         async function loadApplications() {
             try {
-                const response = await fetch('/api/applications');
+                const token = localStorage.getItem('access_token');
+                if (!token) return;
+
+                const response = await fetch('/api/applications', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 const applications = await response.json();
                 
                 const container = document.getElementById('applicationsList');
@@ -487,7 +588,128 @@
             updateStatus();
             loadStatistics();
             loadApplications();
+            // Проверяем статус HH.ru реже, чтобы избежать зацикливания
+            if (Math.random() < 0.3) { // 30% вероятность
+                checkHHConnection();
+            }
         }, 30000);
+
+        // OAuth функции для работы с HH.ru
+        
+        // Подключение к HH.ru через OAuth
+        async function connectHH() {
+            try {
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    showNotification('Необходимо войти в систему', 'warning');
+                    return;
+                }
+
+                // Сначала получаем URL авторизации через API
+                const response = await fetch('/api/oauth/authorize', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    // Получаем URL для перенаправления
+                    const data = await response.json();
+                    if (data.authorization_url) {
+                        window.location.href = data.authorization_url;
+                    } else {
+                        // Если нет URL в ответе, перенаправляем на endpoint
+                        window.location.href = '/api/oauth/authorize';
+                    }
+                } else if (response.status === 307) {
+                    // Если получили redirect, извлекаем URL из заголовка Location
+                    const redirectUrl = response.headers.get('Location');
+                    if (redirectUrl) {
+                        window.location.href = redirectUrl;
+                    } else {
+                        showNotification('Ошибка получения URL авторизации', 'danger');
+                    }
+                } else {
+                    showNotification('Ошибка подключения к HH.ru', 'danger');
+                }
+            } catch (error) {
+                console.error('Ошибка подключения:', error);
+                showNotification('Ошибка подключения к HH.ru', 'danger');
+            }
+        }
+
+        // Проверка статуса подключения HH.ru
+        let lastHHStatusCheck = 0;
+        const HH_STATUS_CHECK_INTERVAL = 10000; // 10 секунд между проверками
+        
+        async function checkHHConnection() {
+            try {
+                const now = Date.now();
+                if (now - lastHHStatusCheck < HH_STATUS_CHECK_INTERVAL) {
+                    return; // Слишком часто
+                }
+                lastHHStatusCheck = now;
+                
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    return;
+                }
+
+                const response = await fetch('/api/oauth/status', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateHHConnectionStatus(data);
+                }
+            } catch (error) {
+                console.error('Ошибка проверки статуса HH.ru:', error);
+            }
+        }
+
+        // Обновление статуса подключения HH.ru
+        function updateHHConnectionStatus(status) {
+            const statusText = document.getElementById('hhStatusText');
+            const connectBtn = document.getElementById('connectHHBtn');
+            const resumeInfo = document.getElementById('resumeInfo');
+            const resumeTitle = document.getElementById('resumeTitle');
+
+            if (status.connected) {
+                statusText.textContent = 'Подключен к HH.ru';
+                statusText.className = 'text-success';
+                connectBtn.textContent = 'Переподключить HH.ru';
+                connectBtn.className = 'btn btn-outline-primary btn-lg w-100';
+                
+                if (status.has_resume) {
+                    resumeInfo.classList.remove('d-none');
+                    resumeTitle.textContent = 'Резюме подключено';
+                }
+                
+                // Включаем кнопки
+                document.getElementById('createSearchBtn').disabled = false;
+                document.getElementById('testConnectionBtn').disabled = false;
+                document.getElementById('runSingleCheckBtn').disabled = false;
+            } else {
+                statusText.textContent = status.message || 'Не подключен к HH.ru';
+                statusText.className = 'text-warning';
+                connectBtn.textContent = 'Подключить HH.ru';
+                connectBtn.className = 'btn btn-primary btn-lg w-100';
+                resumeInfo.classList.add('d-none');
+                
+                // Отключаем кнопки
+                document.getElementById('createSearchBtn').disabled = true;
+                document.getElementById('testConnectionBtn').disabled = true;
+                document.getElementById('runSingleCheckBtn').disabled = true;
+            }
+        }
+
+        // Проверка статуса подключения при загрузке страницы
+        async function checkHHConnectionOnLoad() {
+            await checkHHConnection();
+        }
     </script>
 </body>
 </html> 

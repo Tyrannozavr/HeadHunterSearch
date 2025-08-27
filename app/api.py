@@ -4,18 +4,26 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+from datetime import datetime
 import os
 
 from app.database import get_db, init_db
-from app.models import JobSearchCreate, JobSearchResponse, ApplicationResponse, UserCredentialsCreate
+from app.types import JobSearchCreate, JobSearchResponse, ApplicationResponse
 from app.services import auto_apply_service
-from app.hh_api import hh_client
+from app.utils.hh_api import hh_api_client
+from app.utils.auth import get_current_user
+from app.auth import router as auth_router
+from app.oauth import router as oauth_router
 
 
 app = FastAPI(title="HH.ru Auto Apply", description="Автоматический отклик на вакансии через API HH.ru")
 
 # Подключаем шаблоны
 templates = Jinja2Templates(directory="templates")
+
+# Подключаем роутеры
+app.include_router(auth_router)
+app.include_router(oauth_router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -28,7 +36,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Очистка при завершении"""
-    await hh_client.close()
+    await hh_api_client.close()
     auto_apply_service.stop_auto_apply()
 
 
@@ -36,6 +44,18 @@ async def shutdown_event():
 async def index(request: Request):
     """Главная страница с формой"""
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Страница входа"""
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    """Страница регистрации"""
+    return templates.TemplateResponse("register.html", {"request": request})
 
 
 @app.get("/statistics", response_class=HTMLResponse)
@@ -50,35 +70,23 @@ async def settings(request: Request):
     return templates.TemplateResponse("settings.html", {"request": request})
 
 
-@app.post("/api/credentials", response_model=dict)
-async def save_credentials(
-    credentials: UserCredentialsCreate,
-    session: AsyncSession = Depends(get_db)
-):
-    """Сохранение учетных данных пользователя"""
-    try:
-        await auto_apply_service.save_credentials(
-            session=session,
-            access_token=credentials.access_token,
-            refresh_token=credentials.refresh_token,
-            resume_id=credentials.resume_id
-        )
-        return {"message": "Учетные данные сохранены"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @app.post("/api/job-searches", response_model=JobSearchResponse)
 async def create_job_search(
     job_search: JobSearchCreate,
+    current_user_id: int = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
     """Создание нового поиска работы"""
     try:
-        # Валидируем URL
-        hh_client.extract_filters_from_url(job_search.filter_url)
-        
-        result = await auto_apply_service.create_job_search(session, job_search)
+        # Создаем поиск с привязкой к пользователю
+        result = await auto_apply_service.create_job_search(
+            session, 
+            job_search, 
+            current_user_id
+        )
         return JobSearchResponse.from_orm(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -87,10 +95,13 @@ async def create_job_search(
 
 
 @app.get("/api/job-searches", response_model=List[JobSearchResponse])
-async def get_job_searches(session: AsyncSession = Depends(get_db)):
-    """Получение всех поисков работы"""
+async def get_job_searches(
+    current_user_id: int = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
+    """Получение поисков работы текущего пользователя"""
     try:
-        job_searches = await auto_apply_service.get_job_searches(session)
+        job_searches = await auto_apply_service.get_job_searches(session, current_user_id)
         return [JobSearchResponse.from_orm(js) for js in job_searches]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -98,26 +109,34 @@ async def get_job_searches(session: AsyncSession = Depends(get_db)):
 
 @app.get("/api/applications", response_model=List[ApplicationResponse])
 async def get_applications(
+    current_user_id: int = Depends(get_current_user),
     job_search_id: int = None,
     session: AsyncSession = Depends(get_db)
 ):
-    """Получение откликов"""
+    """Получение откликов текущего пользователя"""
     try:
-        applications = await auto_apply_service.get_applications(session, job_search_id)
+        applications = await auto_apply_service.get_applications(session, current_user_id, job_search_id)
         return [ApplicationResponse.from_orm(app) for app in applications]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/job-searches/{job_search_id}/deactivate")
-async def deactivate_job_search(job_search_id: int, session: AsyncSession = Depends(get_db)):
+async def deactivate_job_search(
+    job_search_id: int, 
+    current_user_id: int = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
     """Деактивация поиска работы"""
     try:
         from sqlalchemy import select
         from app.database import JobSearch
         
         result = await session.execute(
-            select(JobSearch).where(JobSearch.id == job_search_id)
+            select(JobSearch).where(
+                JobSearch.id == job_search_id,
+                JobSearch.user_id == current_user_id
+            )
         )
         job_search = result.scalar_one_or_none()
         
@@ -162,35 +181,61 @@ async def get_status():
 
 
 @app.post("/api/test-connection")
-async def test_connection(session: AsyncSession = Depends(get_db)):
+async def test_connection(
+    current_user_id: int = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
     """Тестирование подключения к API HH.ru"""
     try:
-        access_token = await hh_client.get_access_token(session)
-        if not access_token:
+        # Получаем токен текущего пользователя
+        from sqlalchemy import select
+        from app.database import HHUserCredentials
+        
+        result = await session.execute(
+            select(HHUserCredentials).where(
+                HHUserCredentials.user_id == current_user_id
+            ).order_by(HHUserCredentials.created_at.desc()).limit(1)
+        )
+        credentials = result.scalar_one_or_none()
+        
+        if not credentials or not credentials.access_token:
             # Логируем отсутствие токена
             await auto_apply_service.log_request(
                 session,
                 "test_connection",
                 "no_token",
+                user_id=current_user_id,
                 details="Попытка тестирования подключения без токена"
             )
             raise HTTPException(status_code=400, detail="Нет валидного access token")
         
+        # Проверяем, не истек ли токен
+        if credentials.expires_at and credentials.expires_at <= datetime.now():
+            await auto_apply_service.log_request(
+                session,
+                "test_connection",
+                "token_expired",
+                user_id=current_user_id,
+                details="Токен истек, требуется обновление"
+            )
+            raise HTTPException(status_code=400, detail="Токен истек, требуется обновление")
+        
         # Пробуем получить резюме пользователя
-        resumes = await hh_client.get_user_resumes(access_token)
+        resumes = await hh_api_client.get_user_resumes(credentials.access_token)
         
         # Логируем успешное подключение
         await auto_apply_service.log_request(
             session,
             "test_connection",
             "success",
-            details=f"Подключение успешно, найдено резюме: {len(resumes)}"
+            user_id=current_user_id,
+            details=f"Подключение успешно, найдено резюме: {len(resumes.items)}"
         )
         
         return {
             "status": "success",
             "message": "Подключение к API HH.ru успешно",
-            "resumes_count": len(resumes)
+            "resumes_count": len(resumes.items)
         }
     except Exception as e:
         # Логируем ошибку подключения
@@ -198,6 +243,7 @@ async def test_connection(session: AsyncSession = Depends(get_db)):
             session,
             "test_connection",
             "failed",
+            user_id=current_user_id,
             details="Попытка тестирования подключения",
             error_message=str(e)
         )
@@ -205,12 +251,16 @@ async def test_connection(session: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/run-single-check")
-async def run_single_check(background_tasks: BackgroundTasks, session: AsyncSession = Depends(get_db)):
+async def run_single_check(
+    background_tasks: BackgroundTasks, 
+    current_user_id: int = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
     """Запуск однократной проверки вакансий"""
     try:
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
-            job_searches = await auto_apply_service.get_job_searches(session)
+            job_searches = await auto_apply_service.get_job_searches(session, current_user_id)
             total_applied = 0
             
             for job_search in job_searches:
@@ -228,17 +278,18 @@ async def run_single_check(background_tasks: BackgroundTasks, session: AsyncSess
 
 @app.get("/api/request-logs")
 async def get_request_logs(
+    current_user_id: int = Depends(get_current_user),
     limit: int = 50,
     request_type: str = None,
     status: str = None,
     session: AsyncSession = Depends(get_db)
 ):
-    """Получение логов запросов"""
+    """Получение логов запросов текущего пользователя"""
     try:
         from sqlalchemy import select, desc
         from app.database import RequestLog
         
-        query = select(RequestLog).order_by(desc(RequestLog.created_at))
+        query = select(RequestLog).where(RequestLog.user_id == current_user_id).order_by(desc(RequestLog.created_at))
         
         if request_type:
             query = query.where(RequestLog.request_type == request_type)
@@ -252,6 +303,7 @@ async def get_request_logs(
         return [
             {
                 "id": log.id,
+                "user_id": log.user_id,
                 "job_search_id": log.job_search_id,
                 "request_type": log.request_type,
                 "status": log.status,
@@ -266,7 +318,10 @@ async def get_request_logs(
 
 
 @app.get("/api/system-settings")
-async def get_system_settings(session: AsyncSession = Depends(get_db)):
+async def get_system_settings(
+    current_user_id: int = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db)
+):
     """Получение настроек системы"""
     try:
         settings_data = {
@@ -281,6 +336,7 @@ async def get_system_settings(session: AsyncSession = Depends(get_db)):
 @app.post("/api/system-settings")
 async def update_system_settings(
     request: Request,
+    current_user_id: int = Depends(get_current_user),
     session: AsyncSession = Depends(get_db)
 ):
     """Обновление настроек системы"""
