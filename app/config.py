@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # HH.ru OAuth
     hh_client_id: Optional[str] = None
     hh_client_secret: Optional[str] = None
-    hh_redirect_uri: str = "http://localhost:8000/oauth/callback"
+    hh_redirect_url: str = "http://localhost:8000/oauth/callback"
     hh_user_agent: str = "HH.ru Auto Apply/1.0 (auto-apply@example.com)"
     
     # Security

@@ -14,7 +14,7 @@ class HHOAuthClient:
     def __init__(self):
         self.client_id = settings.hh_client_id or "test"
         self.client_secret = settings.hh_client_secret or "test"
-        self.redirect_uri = settings.hh_redirect_uri
+        self.redirect_uri = settings.hh_redirect_url
         self.base_url = "https://hh.ru"
         self.api_url = "https://api.hh.ru"
     
